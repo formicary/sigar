@@ -220,7 +220,7 @@ static PERF_OBJECT_TYPE *get_perf_object_inst(sigar_t *sigar,
      * confucius say what the fuck.
      */
     if (inst && (object->NumInstances == PERF_NO_INSTANCES)) {
-        int i;
+		DWORD i;
 
         for (i=0; i<block->NumObjectTypes; i++) {
             if (object->NumInstances != PERF_NO_INSTANCES) {
@@ -240,7 +240,7 @@ static PERF_OBJECT_TYPE *get_perf_object_inst(sigar_t *sigar,
 
 static int get_mem_counters(sigar_t *sigar, sigar_swap_t *swap, sigar_mem_t *mem)
 {
-    int status;
+	DWORD status;
     PERF_OBJECT_TYPE *object =
         get_perf_object_inst(sigar, PERF_TITLE_MEM_KEY, 0, &status);
     PERF_INSTANCE_DEFINITION *inst;
@@ -303,12 +303,20 @@ SIGAR_DECLARE(sigar_t *) sigar_new(void)
 }
 
 static sigar_wtsapi_t sigar_wtsapi = {
-    "wtsapi32.dll",
-    NULL,
-    { "WTSEnumerateSessionsA", NULL },
-    { "WTSFreeMemory", NULL },
-    { "WTSQuerySessionInformationA", NULL },
-    { NULL, NULL }
+	"wtsapi32.dll",
+	NULL,
+#ifdef _UNICODE
+	{ "WTSEnumerateSessionsW", NULL },
+#else
+	{ "WTSEnumerateSessionsA", NULL },
+#endif
+	{ "WTSFreeMemory", NULL },
+#ifdef _UNICODE
+	{ "WTSQuerySessionInformationW", NULL },
+#else
+	{ "WTSQuerySessionInformationA", NULL },
+#endif
+	{ NULL, NULL }
 };
 
 static sigar_iphlpapi_t sigar_iphlpapi = {
@@ -331,11 +339,15 @@ static sigar_iphlpapi_t sigar_iphlpapi = {
 };
 
 static sigar_advapi_t sigar_advapi = {
-    "advapi32.dll",
-    NULL,
-    { "ConvertStringSidToSidA", NULL },
-    { "QueryServiceStatusEx", NULL },
-    { NULL, NULL }
+	"advapi32.dll",
+	NULL,
+#ifdef _UNICODE
+	{ "ConvertStringSidToSidW", NULL },
+#else
+	{ "ConvertStringSidToSidA", NULL },
+#endif
+	{ "QueryServiceStatusEx", NULL },
+	{ NULL, NULL }
 };
 
 static sigar_ntdll_t sigar_ntdll = {
@@ -1166,7 +1178,12 @@ int sigar_os_proc_list_get(sigar_t *sigar,
 
 static HANDLE open_process(sigar_pid_t pid)
 {
-    return OpenProcess(PROCESS_DAC, 0, (DWORD)pid);
+	HANDLE handle = OpenProcess(PROCESS_DAC, 0, (DWORD)pid);
+	if (handle == NULL) {
+		/* Probably a Protected Process ... */
+		handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, (DWORD)pid);
+	}
+	return handle;
 }
 
 /*
@@ -1659,6 +1676,25 @@ SIGAR_DECLARE(int) sigar_proc_fd_get(sigar_t *sigar, sigar_pid_t pid,
     return SIGAR_OK;
 }
 
+/* Method to fetch process names when permission is limited */
+/* CWD will not be populated in procexe*/
+SIGAR_DECLARE(int) sigar_proc_exe_name_get(sigar_t *sigar, HANDLE proc,
+											sigar_proc_exe_t *procexe)
+{
+	int status;
+	DWORD size = MAX_PATH;
+
+	// QueryFullProcessImageName populates a TCHAR but procexe->name is a char 
+	// I am unsure if further work is needed to handle non-ASCII charater sets
+	if (QueryFullProcessImageName(proc, /*win32 path format*/ 0, procexe->name, &size)) {
+		return SIGAR_OK; 
+	}
+	else {
+		return GetLastError();
+	}
+
+}
+
 SIGAR_DECLARE(int) sigar_proc_exe_get(sigar_t *sigar, sigar_pid_t pid,
                                       sigar_proc_exe_t *procexe)
 {
@@ -1677,6 +1713,11 @@ SIGAR_DECLARE(int) sigar_proc_exe_get(sigar_t *sigar, sigar_pid_t pid,
         if (status == ERROR_NOT_FOUND) {
             status = SIGAR_NO_SUCH_PROCESS;
         }
+		if (procexe->name[0] == '\0') {
+			/* We may lack the required permissions */
+			/* Try option that only requires PROCESS_QUERY_LIMITED_INFORMATION */
+			status = sigar_proc_exe_name_get(sigar, proc, procexe);
+		}
     }
 
     if (procexe->cwd[0] != '\0') {

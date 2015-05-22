@@ -620,8 +620,8 @@ JNIEXPORT void SIGAR_JNI(CpuPerc_gather)
     sigar_cpu_perc_t perc;
     dSIGAR_VOID;
 
-    JAVA_SIGAR_GET_FIELDS_CPU(jprev, prev);
-    JAVA_SIGAR_GET_FIELDS_CPU(jcurr, curr);
+    JAVA_SIGAR_GET_FIELDS_CPU(jprev, prev); //copy fields from java object to C object
+    JAVA_SIGAR_GET_FIELDS_CPU(jcurr, curr); //copy fields from java object to C object
     sigar_cpu_perc_calculate(&prev, &curr, &perc);
     JAVA_SIGAR_INIT_FIELDS_CPUPERC(JENV->GetObjectClass(env, jperc));
     JAVA_SIGAR_SET_FIELDS_CPUPERC(NULL, jperc, perc);
